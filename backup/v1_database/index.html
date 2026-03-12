@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UNV 数据查看器</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+    .container { max-width: 1600px; margin: 0 auto; }
+    .header { background: white; border-radius: 12px; padding: 20px 30px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .header h1 { color: #333; font-size: 28px; margin-bottom: 5px; }
+    .header p { color: #666; font-size: 14px; margin-bottom: 15px; }
+    .header-tabs { display: flex; gap: 10px; }
+    .header-tab { padding: 10px 20px; background: #f0f0f0; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: #666; }
+    .header-tab:hover { background: #e0e0e0; }
+    .header-tab.active { background: #667eea; color: white; }
+    .view-section { display: none; }
+    .view-section.active { display: block; }
+    .main-content { display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+    .sidebar { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); height: fit-content; max-height: calc(100vh - 200px); overflow-y: auto; }
+    .sidebar h3 { color: #333; margin-bottom: 15px; font-size: 16px; }
+    .upload-area { border: 2px dashed #ddd; border-radius: 8px; padding: 25px; text-align: center; cursor: pointer; margin-bottom: 20px; }
+    .upload-area:hover { border-color: #667eea; background: #f8f9ff; }
+    .upload-icon { font-size: 36px; margin-bottom: 8px; }
+    .upload-text { color: #666; font-size: 13px; }
+    .file-input { display: none; }
+    .test-file-item { padding: 10px; margin-bottom: 6px; background: #f8f9fa; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    .test-file-item:hover { background: #e9ecef; }
+    .test-file-item .filename { color: #333; font-weight: 500; }
+    .test-file-item .filesize { color: #999; font-size: 10px; margin-top: 2px; }
+    .content-area { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-height: calc(100vh - 200px); }
+    .loading { display: flex; justify-content: center; align-items: center; height: 400px; color: #666; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .file-info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+    .file-info h3 { color: #333; margin-bottom: 10px; font-size: 15px; }
+    .file-info-grid { display: flex; flex-wrap: wrap; gap: 15px; }
+    .file-info-item { display: flex; gap: 6px; }
+    .file-info-label { color: #666; font-size: 12px; }
+    .file-info-value { color: #333; font-size: 12px; font-weight: 500; }
+    .summary { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 15px; }
+    .summary-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 18px; border-radius: 8px; text-align: center; }
+    .summary-card .value { font-size: 22px; font-weight: bold; }
+    .summary-card .label { font-size: 11px; opacity: 0.9; margin-top: 3px; }
+    .datasets-tabs { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
+    .dataset-nav-btn { width: 32px; height: 32px; border: none; border-radius: 6px; background: #667eea; color: white; font-size: 16px; cursor: pointer; }
+    .dataset-nav-btn:disabled { background: #ccc; }
+    .dataset-selector { flex: 1; display: flex; align-items: center; gap: 10px; }
+    .dataset-selector label { font-size: 13px; color: #333; }
+    .dataset-selector select { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+    .dataset-info { font-size: 12px; color: #666; }
+    .chart-controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px; }
+    .chart-controls label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #333; }
+    .chart-controls select { padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+    .chart-container { position: relative; height: 500px; }
+    .empty-state { text-align: center; padding: 80px 20px; color: #999; }
+    .empty-state-icon { font-size: 60px; margin-bottom: 20px; }
+    .error-message { background: #fff5f5; border: 1px solid #feb2b2; color: #c53030; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+    .hidden { display: none !important; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+    .db-stats { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+    .db-stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; border-radius: 8px; text-align: center; min-width: 120px; }
+    .db-stat-card .value { font-size: 24px; font-weight: bold; }
+    .db-stat-card .label { font-size: 12px; opacity: 0.9; margin-top: 5px; }
+    .import-controls { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; padding: 15px; background: #f8f9fa; border-radius: 8px; }
+    .import-btn { padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .import-btn:hover { background: #5568d3; }
+    .folder-input { flex: 1; min-width: 200px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+    .db-file-list { max-height: 400px; overflow-y: auto; }
+    .db-file-item { display: flex; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border-radius: 6px; cursor: pointer; }
+    .db-file-item:hover { background: #e9ecef; }
+    .db-file-item .file-icon { font-size: 24px; margin-right: 12px; }
+    .db-file-item .file-info { flex: 1; background: transparent; padding: 0; }
+    .db-file-item .file-name { font-weight: 500; color: #333; font-size: 14px; }
+    .db-file-item .file-meta { font-size: 12px; color: #666; margin-top: 3px; }
+    .db-file-item .action-btn { padding: 5px 10px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-left: 8px; }
+    .db-file-item .action-btn.delete { background: #e74c3c; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>UNV 数据查看器</h1>
+      <p>解析和显示 Universal File Format (UNV) 数据</p>
+      <div class="header-tabs">
+        <button class="header-tab active" onclick="switchView('disk')">文件浏览</button>
+        <button class="header-tab" onclick="switchView('database')">数据库</button>
+      </div>
+    </div>
+    
+    <!-- 磁盘文件视图 -->
+    <div id="diskView" class="view-section active">
+      <div class="main-content">
+        <div class="sidebar">
+          <h3>选择文件</h3>
+          <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">UP</div>
+            <div class="upload-text">点击或拖拽上传UNV文件</div>
+            <input type="file" class="file-input" id="fileInput" accept=".unv,.txt">
+          </div>
+          <div class="test-files" id="testFilesSection">
+            <h4>测试数据</h4>
+            <div id="testFilesList"></div>
+          </div>
+        </div>
+        <div class="content-area">
+          <div id="loading" class="loading hidden"><div class="spinner"></div></div>
+          <div id="errorContainer"></div>
+          <div id="emptyState" class="empty-state">
+            <div class="empty-state-icon">FILE</div>
+            <p>请选择UNV文件开始查看</p>
+          </div>
+          <div id="dataContent" class="hidden">
+            <div class="file-info">
+              <h3>文件信息</h3>
+              <div class="file-info-grid">
+                <div class="file-info-item"><span class="file-info-label">文件名:</span><span class="file-info-value" id="fileName">-</span></div>
+                <div class="file-info-item"><span class="file-info-label">文件大小:</span><span class="file-info-value" id="fileSize">-</span></div>
+                <div class="file-info-item"><span class="file-info-label">数据集数量:</span><span class="file-info-value" id="datasetCount">-</span></div>
+              </div>
+            </div>
+            <div class="summary" id="summarySection"></div>
+            <div class="datasets-tabs">
+              <button class="dataset-nav-btn" id="prevBtn" onclick="navigateDataset(-1)">L</button>
+              <div class="dataset-selector"><label>数据集:</label><select id="datasetSelect" onchange="selectDatasetFromDropdown()"></select><span class="dataset-info" id="datasetInfo"></span></div>
+              <button class="dataset-nav-btn" id="nextBtn" onclick="navigateDataset(1)">R</button>
+            </div>
+            <div class="chart-controls">
+              <label>X轴:<select id="xAxisType" onchange="updateChart()"><option value="linear">线性</option><option value="logarithmic">对数</option></select></label>
+              <label>Y轴:<select id="yAxisType" onchange="updateChart()"><option value="linear">线性</option><option value="logarithmic">对数</option></select></label>
+            </div>
+            <div id="chartContainer" class="chart-container"><canvas id="dataChart"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 数据库视图 -->
+    <div id="databaseView" class="view-section">
+      <div class="main-content">
+        <div class="sidebar">
+          <h3>已入库文件</h3>
+          <div class="db-file-list" id="dbFileList"><p style="color:#999;text-align:center;padding:20px;">暂无数据</p></div>
+        </div>
+        <div class="content-area">
+          <div class="db-stats" id="dbStats"></div>
+          <div class="import-controls">
+            <input type="text" class="folder-input" id="folderPath" placeholder="输入文件夹路径...">
+            <button class="import-btn" onclick="browseFolder()">浏览</button>
+            <button class="import-btn" onclick="importAllFiles()">全部入库</button>
+            <button class="import-btn" onclick="importSelectedFiles()">选中入库</button>
+          </div>
+          <div id="dbLoading" class="loading hidden"><div class="spinner"></div></div>
+          <div id="dbEmptyState" class="empty-state">
+            <div class="empty-state-icon">DB</div>
+            <p>从数据库加载文件查看曲线</p>
+          </div>
+          <div id="dbDataContent" class="hidden">
+            <div class="file-info">
+              <h3>文件信息</h3>
+              <div class="file-info-grid">
+                <div class="file-info-item"><span class="file-info-label">文件名:</span><span class="file-info-value" id="dbFileName">-</span></div>
+                <div class="file-info-item"><span class="file-info-label">入库时间:</span><span class="file-info-value" id="dbImportTime">-</span></div>
+                <div class="file-info-item"><span class="file-info-label">数据集:</span><span class="file-info-value" id="dbDatasetCount">-</span></div>
+              </div>
+            </div>
+            <div class="summary" id="dbSummarySection"></div>
+            <div class="datasets-tabs">
+              <button class="dataset-nav-btn" id="dbPrevBtn" onclick="navigateDbDataset(-1)">L</button>
+              <div class="dataset-selector"><label>数据集:</label><select id="dbDatasetSelect" onchange="selectDbDatasetFromDropdown()"></select><span class="dataset-info" id="dbDatasetInfo"></span></div>
+              <button class="dataset-nav-btn" id="dbNextBtn" onclick="navigateDbDataset(1)">R</button>
+            </div>
+            <div class="chart-controls">
+              <label>X轴:<select id="dbXAxisType" onchange="updateDbChart()"><option value="linear">线性</option><option value="logarithmic">对数</option></select></label>
+              <label>Y轴:<select id="dbYAxisType" onchange="updateDbChart()"><option value="linear">线性</option><option value="logarithmic">对数</option></select></label>
+            </div>
+            <div id="dbChartContainer" class="chart-container"><canvas id="dbDataChart"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentData = null, currentDatasetIndex = 0, chart = null;
+    let dbFiles = [], currentDbFile = null, currentDbFileDatasets = [], currentDbDatasetIndex = 0, dbChart = null;
+    
+    const uploadArea = document.getElementById('uploadArea'), fileInput = document.getElementById('fileInput'), loading = document.getElementById('loading'), emptyState = document.getElementById('emptyState'), dataContent = document.getElementById('dataContent'), errorContainer = document.getElementById('errorContainer'), testFilesList = document.getElementById('testFilesList');
+    
+    document.addEventListener('DOMContentLoaded', () => { loadTestFiles(); setupEventListeners(); loadDbStats(); });
+    
+    function setupEventListeners() {
+      uploadArea.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', (e) => { if (e.target.files[0]) uploadFile(e.target.files[0]); });
+      uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); });
+      uploadArea.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
+    }
+    
+    function switchView(view) {
+      document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+      if (view === 'disk') { document.querySelector('.header-tab:first-child').classList.add('active'); document.getElementById('diskView').classList.add('active'); }
+      else { document.querySelector('.header-tab:last-child').classList.add('active'); document.getElementById('databaseView').classList.add('active'); loadDbFiles(); }
+    }
+    
+    async function loadTestFiles() {
+      try {
+        const r = await fetch('/api/testfiles');
+        const result = await r.json();
+        if (result.files && result.files.length) testFilesList.innerHTML = result.files.map(f => `<div class="test-file-item" onclick="loadFile('${f.path.replace(/\\/g,'\\\\')}')"><div class="filename">${f.name}</div><div class="filesize">${f.sizeFormatted}</div></div>`).join('');
+        else document.getElementById('testFilesSection').classList.add('hidden');
+      } catch (e) { document.getElementById('testFilesSection').classList.add('hidden'); }
+    }
+    
+    function uploadFile(file) { showLoading(); hideError(); const fd = new FormData(); fd.append('file', file); fetch('/api/parse', { method: 'POST', body: fd }).then(r => r.json()).then(d => { if (!r.ok) throw new Error(d.error); displayData(d); }).catch(e => showError(e.message)); }
+    
+    async function loadFile(path) { showLoading(); hideError(); try { const r = await fetch('/api/parse-path', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: path }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); displayData(d); } catch(e) { showError(e.message); } }
+    
+    function displayData(d) { currentData = d; currentDatasetIndex = 0; hideLoading(); hideEmptyState(); document.getElementById('fileName').textContent = d.fileName||'-'; document.getElementById('fileSize').textContent = d.fileSizeFormatted||formatFileSize(d.fileSize||0); document.getElementById('datasetCount').textContent = d.totalDatasets||0; displaySummary(d); displayDatasetTabs(d.datasets); if (d.datasets&&d.datasets.length) renderChart(d.datasets[0]); }
+    
+    function displaySummary(d) {
+      let s = d.summary||{}, html = `<div class="summary-card"><div class="value">${d.totalDatasets||0}</div><div class="label">数据集</div></div><div class="summary-card"><div class="value">${s.totalRecords||0}</div><div class="label">数据点</div></div>`;
+      if (s.datasetTypes) for (let [t,c] of Object.entries(s.datasetTypes)) if(c>0) html += `<div class="summary-card"><div class="value">${c}</div><div class="label">${t}</div></div>`;
+      document.getElementById('summarySection').innerHTML = html;
+    }
+    
+    function displayDatasetTabs(datasets) {
+      const sc = document.getElementById('datasetSelect');
+      if (!datasets||!datasets.length) { sc.innerHTML = '<option>无可用数据</option>'; return; }
+      sc.innerHTML = datasets.map((ds,i) => { let pt = ds.records&&ds.records.totalPoints?` (${ds.records.totalPoints}点)`:(ds.records&&ds.records.count?` (${ds.records.count})`:''); return `<option value="${i}">#${ds.number}: ${ds.name}${pt}</option>`; }).join('');
+      sc.value = currentDatasetIndex; updateDatasetInfo();
+    }
+    
+    function updateDatasetInfo() {
+      if (!currentData||!currentData.datasets) return;
+      document.getElementById('datasetInfo').textContent = `${currentDatasetIndex+1} / ${currentData.datasets.length}`;
+      document.getElementById('prevBtn').disabled = currentDatasetIndex===0;
+      document.getElementById('nextBtn').disabled = currentDatasetIndex===currentData.datasets.length-1;
+    }
+    
+    function selectDatasetFromDropdown() { currentDatasetIndex = parseInt(document.getElementById('datasetSelect').value); if(currentData.datasets[currentDatasetIndex]) renderChart(currentData.datasets[currentDatasetIndex]); updateDatasetInfo(); }
+    
+    function navigateDataset(d) { if (!currentData||!currentData.datasets) return; let ni = currentDatasetIndex + d; if (ni>=0 && ni<currentData.datasets.length) { currentDatasetIndex = ni; document.getElementById('datasetSelect').value = ni; renderChart(currentData.datasets[ni]); updateDatasetInfo(); } }
+    
+    function renderChart(dataset) {
+      const ctx = document.getElementById('dataChart').getContext('2d');
+      if (chart) { chart.destroy(); chart = null; }
+      if (!dataset||!dataset.records) { ctx.fillText('无图表数据',200,200); return; }
+      const r = dataset.records;
+      if (r.type==='function' && r.data && r.data.length) {
+        const curves = extractCurves(r.data);
+        const ds = curves.map((c,i) => ({ label: c.label, data: c.points, borderColor: getCurveColor(i), borderWidth:2, pointRadius:0, tension:0.1, fill:false }));
+        chart = new Chart(ctx, { type:'line', data:{ labels: curves[0]?.points.map(p=>p.x)||[], datasets:ds }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'top'} }, scales:{ x:{type:document.getElementById('xAxisType')?.value||'linear',title:{display:true,text:'X'}}, y:{type:document.getElementById('yAxisType')?.value||'linear',title:{display:true,text:'Y'}} } } });
+      } else ctx.fillText(`类型: ${r.type}`,200,200);
+    }
+    
+    function extractCurves(data) {
+      const curves = []; if (!data||!data.length) return curves;
+      const fp = data[0]; if (!Array.isArray(fp)||fp.length<2) return curves;
+      const hi = fp.length>=3, xv = data.map(p=>p[0]), yr = data.map(p=>p[1]);
+      curves.push({label:'实部', points:xv.map((x,i)=>({x,y:yr[i]}))});
+      if (hi) { const yi = data.map(p=>p[2]); curves.push({label:'虚部', points:xv.map((x,i)=>({x,y:yi[i]}))}); const ym = data.map(p=>Math.sqrt(p[1]*p[1]+p[2]*p[2])); curves.push({label:'幅值', points:xv.map((x,i)=>({x,y:ym[i]}))}); }
+      return curves;
+    }
+    
+    function getCurveColor(i) { const c=['#667eea','#764ba2','#e74c3c','#27ae60','#3498db','#f1c40f']; return c[i%c.length]; }
+    function updateChart() { if (currentData&&currentData.datasets&&currentData.datasets[currentDatasetIndex]) renderChart(currentData.datasets[currentDatasetIndex]); }
+    function showLoading() { loading.classList.remove('hidden'); emptyState.classList.add('hidden'); dataContent.classList.add('hidden'); }
+    function hideLoading() { loading.classList.add('hidden'); dataContent.classList.remove('hidden'); }
+    function hideEmptyState() { emptyState.classList.add('hidden'); }
+    function showError(m) { hideLoading(); errorContainer.innerHTML = `<div class="error-message">${m}</div>`; }
+    function hideError() { errorContainer.innerHTML = ''; }
+    function formatFileSize(b) { if(!b)return'0 B';const k=1024,s=['B','KB','MB','GB'];let i=0;while(b>=k&&i<s.length-1){b/=k;i++;}return b.toFixed(2)+' '+s[i];}
+    
+    // Database functions
+    async function loadDbStats() { try { const r=await fetch('/api/db/stats'); const s=await r.json(); document.getElementById('dbStats').innerHTML=` <div class="db-stat-card"><div class="value">${s.total_files||0}</div><div class="label">文件</div></div><div class="db-stat-card"><div class="value">${s.total_datasets||0}</div><div class="label">数据集</div></div><div class="db-stat-card"><div class="value">${s.total_points||0}</div><div class="label">数据点</div></div><div class="db-stat-card"><div class="value">${s.total_size_formatted||'0 B'}</div><div class="label">大小</div></div>`; } catch(e){} }
+    
+    async function loadDbFiles() { try { const r=await fetch('/api/db/files'); const result=await r.json(); dbFiles=result.files||[]; if(!dbFiles.length) document.getElementById('dbFileList').innerHTML='<p style="color:#999;text-align:center;">暂无数据</p>'; else document.getElementById('dbFileList').innerHTML=dbFiles.map(f=>`<div class="db-file-item" onclick="loadDbFile(${f.id})"><div class="file-icon">F</div><div class="file-info"><div class="file-name">${f.file_name}</div><div class="file-meta">${f.file_size_formatted}|${f.total_datasets}个|${f.import_time}</div></div><button class="action-btn delete" onclick="event.stopPropagation();deleteDbFile(${f.id})">X</button></div>`).join(''); }catch(e){} }
+    
+    async function loadDbFile(id) {
+      document.getElementById('dbLoading').classList.remove('hidden'); document.getElementById('dbEmptyState').classList.add('hidden'); document.getElementById('dbDataContent').classList.add('hidden');
+      try { const r=await fetch(`/api/db/file/${id}`); const fi=await r.json(); currentDbFile=fi; currentDbFileDatasets=fi.datasets||[]; currentDbDatasetIndex=0; document.getElementById('dbFileName').textContent=fi.file_name; document.getElementById('dbImportTime').textContent=fi.import_time; document.getElementById('dbDatasetCount').textContent=fi.total_datasets; displayDbDatasetTabs(); document.getElementById('dbLoading').classList.add('hidden'); document.getElementById('dbDataContent').classList.remove('hidden'); if(currentDbFileDatasets.length) loadDbDatasetData(0); } catch(e){ document.getElementById('dbLoading').classList.add('hidden'); alert('加载失败'); }
+    }
+    
+    async function loadDbDatasetData(i) {
+      if(!currentDbFileDatasets[i]) return; const ds=currentDbFileDatasets[i];
+      try { const r=await fetch(`/api/db/dataset/${ds.id}?limit=5000`); const d=await r.json(); currentDbFileDatasets[i].data=d.data||[]; renderDbChart(currentDbFileDatasets[i],ds); }catch(e){}
+    }
+    
+    function displayDbDatasetTabs() {
+      const sc=document.getElementById('dbDatasetSelect');
+      if(!currentDbFileDatasets.length){sc.innerHTML='<option>无可用数据</option>';return;}
+      sc.innerHTML=currentDbFileDatasets.map((ds,i)=>`<option value="${i}">#${ds.dataset_number}: ${ds.dataset_name} (${ds.data_points||0}点)</option>`).join('');
+      sc.value=currentDbDatasetIndex; updateDbDatasetInfo();
+    }
+    
+    function updateDbDatasetInfo() {
+      document.getElementById('dbDatasetInfo').textContent=`${currentDbDatasetIndex+1} / ${currentDbFileDatasets.length}`;
+      document.getElementById('dbPrevBtn').disabled=currentDbDatasetIndex===0;
+      document.getElementById('dbNextBtn').disabled=currentDbDatasetIndex===currentDbFileDatasets.length-1;
+    }
+    
+    function selectDbDatasetFromDropdown() { currentDbDatasetIndex=parseInt(document.getElementById('dbDatasetSelect').value); loadDbDatasetData(currentDbDatasetIndex); updateDbDatasetInfo(); }
+    function navigateDbDataset(d) { let ni=currentDbDatasetIndex+d; if(ni>=0&&ni<currentDbFileDatasets.length){currentDbDatasetIndex=ni;document.getElementById('dbDatasetSelect').value=ni;loadDbDatasetData(ni);updateDbDatasetInfo();} }
+    
+    function renderDbChart(dataset, info) {
+      const ctx=document.getElementById('dbDataChart').getContext('2d');
+      if(dbChart){dbChart.destroy();dbChart=null;}
+      if(!dataset||!dataset.data||!dataset.data.length){ctx.fillText('无数据',200,200);return;}
+      const curves=extractCurves(dataset.data);
+      const ds=curves.map((c,i)=>({label:c.label,data:c.points,borderColor:getCurveColor(i),borderWidth:2,pointRadius:0,tension:0.1,fill:false}));
+      dbChart=new Chart(ctx,{type:'line',data:{labels:curves[0]?.points.map(p=>p.x)||[],datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{x:{type:document.getElementById('dbXAxisType')?.value||'linear',title:{display:true,text:'X'}},y:{type:document.getElementById('dbYAxisType')?.value||'linear',title:{display:true,text:'Y'}}}}}});
+    }
+    
+    function updateDbChart(){if(currentDbFileDatasets[currentDbDatasetIndex])renderDbChart(currentDbFileDatasets[currentDbDatasetIndex],currentDbFileDatasets[currentDbDatasetIndex]);}
+    
+    async function browseFolder(){const p=document.getElementById('folderPath').value;if(!p)return alert('请输入路径');try{const r=await fetch('/api/db/folder-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderPath:p})});const d=await r.json();if(d.files&&d.files.length){document.getElementById('dbStats').style.display='none';document.getElementById('fileChecklist').innerHTML=d.files.map(f=>`<div class="file-checklist-item"><input type="checkbox" data-path="${f.path}" ${f.imported?'disabled checked':''}><span class="file-name">${f.name}</span>${f.imported?'<span class="imported-badge">已入库</span>':'<span class="imported-badge pending">待入库</span>'}</div>`).join('');}}catch(e){alert(e.message);}}
+    
+    async function importAllFiles(){
+      const path=document.getElementById('folderPath').value;
+      if(!path)return alert('请输入路径');
+      document.getElementById('dbLoading').classList.remove('hidden');
+      try{const r=await fetch('/api/db/import-folder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderPath:path})});const d=await r.json();alert(`成功:${d.success?.length||0} 跳过:${d.skipped?.length||0} 失败:${d.failed?.length||0}`);loadDbFiles();loadDbStats();}catch(e){alert(e.message);}
+      document.getElementById('dbLoading').classList.add('hidden');
+    }
+    
+    async function importSelectedFiles(){
+      const checked=document.querySelectorAll('#fileChecklist input:checked:not(:disabled)');
+      if(!checked.length)return alert('请选择文件');
+      document.getElementById('dbLoading').classList.remove('hidden');
+      const paths=Array.from(checked).map(c=>c.dataset.path);
+      try{const r=await fetch('/api/db/select-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filePaths:paths})});const d=await r.json();alert(`成功:${d.success?.length||0} 失败:${d.failed?.length||0}`);loadDbFiles();loadDbStats();}catch(e){alert(e.message);}
+      document.getElementById('dbLoading').classList.add('hidden');
+    }
+    
+    async function deleteDbFile(id){if(!confirm('确认删除?'))return;try{await fetch(`/api/db/delete-file/${id}`,{method:'DELETE'});loadDbFiles();loadDbStats();}catch(e){alert(e.message);}}
+  </script>
+</body>
+</html>
