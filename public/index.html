@@ -30,6 +30,16 @@
     .test-file-item:hover { background: #e9ecef; }
     .test-file-item .filename { color: #333; font-weight: 500; }
     .test-file-item .filesize { color: #999; font-size: 10px; margin-top: 2px; }
+    .selected-files { max-height: 300px; overflow-y: auto; }
+    .selected-file-item { padding: 10px; margin-bottom: 6px; background: #e8f5e9; border-radius: 6px; cursor: pointer; font-size: 12px; border: 1px solid #a5d6a7; }
+    .selected-file-item:hover { background: #c8e6c9; }
+    .selected-file-item .filename { color: #2e7d32; font-weight: 500; }
+    .selected-file-item .filesize { color: #666; font-size: 10px; margin-top: 2px; }
+    .selected-file-item input[type="checkbox"] { margin-right: 8px; }
+    .selected-file-item.selected { background: #e3f2fd; border-color: #2196f3; }
+    .compare-btn { width: 100%; padding: 10px; background: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-top: 10px; }
+    .compare-btn:hover { background: #219a52; }
+    .compare-btn:disabled { background: #ccc; }
     .content-area { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-height: calc(100vh - 200px); }
     .loading { display: flex; justify-content: center; align-items: center; height: 400px; color: #666; }
     .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
@@ -70,6 +80,7 @@
     .db-file-item { display: flex; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border-radius: 6px; cursor: pointer; }
     .db-file-item:hover { background: #e9ecef; }
     .db-file-item.selected { background: #e3f2fd; border: 2px solid #2196f3; }
+    .db-file-item input[type="checkbox"] { margin-right: 8px; }
     .db-file-item .file-icon { font-size: 24px; margin-right: 12px; }
     .db-file-item .file-info { flex: 1; }
     .db-file-item .file-name { font-weight: 500; color: #333; font-size: 14px; }
@@ -179,16 +190,15 @@
     <div id="diskView" class="view-section active">
       <div class="main-content">
         <div class="sidebar">
-          <h3>选择文件</h3>
+          <h3>已选择文件</h3>
+          <div id="selectedFilesList" class="selected-files"></div>
+          <button class="compare-btn" id="compareBtn" onclick="startCompare()" disabled>开始对比</button>
           <div class="upload-area" id="uploadArea">
             <div class="upload-icon">UP</div>
             <div class="upload-text">点击或拖拽上传UNV文件</div>
-            <input type="file" class="file-input" id="fileInput" accept=".unv,.txt">
+            <input type="file" class="file-input" id="fileInput" accept=".unv,.txt" multiple>
           </div>
-          <div class="test-files" id="testFilesSection">
-            <h4>测试数据</h4>
-            <div id="testFilesList"></div>
-          </div>
+
         </div>
         <div class="content-area">
           <div id="loading" class="loading hidden"><div class="spinner"></div></div>
@@ -227,6 +237,7 @@
         <div class="sidebar">
           <h3>文件列表</h3>
           <div class="db-file-list" id="dbFileList"><p style="color:#999;text-align:center;padding:20px;">暂无数据</p></div>
+          <button class="compare-btn" id="dbCompareBtn" onclick="startDbCompare()" disabled>开始对比</button>
         </div>
         <div class="content-area">
           <div class="db-stats" id="dbStats"></div>
@@ -543,14 +554,18 @@
     // Disk view
     let currentData = null, currentDatasetIndex = 0, chart = null;
     let selectedCurveType = 'all'; // 'all', 'real', 'imag', 'mag' - 曲线选择类型
+    let uploadedFilesData = {}; // 存储已上传文件的数据
+    let selectedFileNames = new Set(); // 选中的文件名（用于对比）
+    let isCompareMode = false; // 是否是对比模式
     // Database view
     let dbFiles = [], currentDbFile = null, currentDbFileDatasets = [], currentDbDatasetIndex = 0, dbChart = null;
     let dbSelectedCurveType = 'all';
+    let selectedDbFileIds = new Set(); // 选中的数据库文件ID（用于对比）
+    let isDbCompareMode = false; // 是否是对比模式
     
     const uploadArea = document.getElementById('uploadArea'), fileInput = document.getElementById('fileInput'), loading = document.getElementById('loading'), emptyState = document.getElementById('emptyState'), dataContent = document.getElementById('dataContent'), errorContainer = document.getElementById('errorContainer'), testFilesList = document.getElementById('testFilesList');
     
     document.addEventListener('DOMContentLoaded', () => { 
-      loadTestFiles(); 
       setupEventListeners();
       loadDbStats();
       // 设置文件夹选择器
@@ -674,9 +689,9 @@
     
     function setupEventListeners() {
       uploadArea.addEventListener('click', () => fileInput.click());
-      fileInput.addEventListener('change', (e) => { if (e.target.files[0]) uploadFile(e.target.files[0]); });
+      fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFileSelect(e.target.files); });
       uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); });
-      uploadArea.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
+      uploadArea.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files); });
     }
     
     function switchView(view) {
@@ -685,10 +700,16 @@
       if (view === 'disk') {
         document.querySelector('.header-tab:first-child').classList.add('active');
         document.getElementById('diskView').classList.add('active');
+        // 清除数据库视图的选中状态
+        selectedDbFileIds.clear();
+        isDbCompareMode = false;
       } else {
         document.querySelector('.header-tab:last-child').classList.add('active');
         document.getElementById('databaseView').classList.add('active');
         loadDbFiles();
+        // 清除文件浏览视图的选中状态
+        selectedFileNames.clear();
+        isCompareMode = false;
       }
     }
     
@@ -702,11 +723,20 @@
       } catch (e) { document.getElementById('testFilesSection').classList.add('hidden'); }
     }
     
-    function uploadFile(file) { 
+    function uploadFile(files) { 
+      // 支持单文件或多文件
+      const fileList = files instanceof FileList ? Array.from(files) : [files];
+      if (fileList.length === 0) return;
+      
+      // 在侧边栏显示选择的文件
+      displaySelectedFiles(fileList);
+      
+      // 依次上传每个文件，只显示第一个文件的数据
       showLoading(); 
       hideError(); 
+      
       const fd = new FormData(); 
-      fd.append('file', file); 
+      fd.append('file', fileList[0]); 
       fetch('/api/parse', { method: 'POST', body: fd })
         .then(res => {
           if (!res.ok) throw new Error('请求失败: ' + res.status);
@@ -718,9 +748,276 @@
         .catch(e => showError(e.message)); 
     }
     
+    function displaySelectedFiles(files) {
+      const container = document.getElementById('selectedFilesList');
+      if (!container) return;
+      
+      container.innerHTML = files.map(f => `
+        <div class="selected-file-item ${selectedFileNames.has(f.name) ? 'selected' : ''}" onclick="toggleFileSelect('${f.name}', event)">
+          <input type="checkbox" ${selectedFileNames.has(f.name) ? 'checked' : ''} onclick="event.stopPropagation(); toggleFileSelect('${f.name}', event)">
+          <div class="filename">${f.name}</div>
+          <div class="filesize">${formatFileSize(f.size)}</div>
+        </div>
+      `).join('');
+      
+      updateCompareButton();
+    }
+    
+    function toggleFileSelect(filename, event) {
+      if (selectedFileNames.has(filename)) {
+        selectedFileNames.delete(filename);
+      } else {
+        selectedFileNames.add(filename);
+      }
+      displaySelectedFiles(Object.keys(uploadedFilesData).map(name => ({ name: name, size: 0 })));
+      
+      // 如果不是对比模式，点击文件切换显示
+      if (!isCompareMode && uploadedFilesData[filename]) {
+        displayData(uploadedFilesData[filename]);
+      }
+    }
+    
+    function updateCompareButton() {
+      const btn = document.getElementById('compareBtn');
+      btn.disabled = selectedFileNames.size < 2;
+    }
+    
+    function startCompare() {
+      if (selectedFileNames.size < 2) {
+        alert('请至少选择2个文件进行对比');
+        return;
+      }
+      
+      isCompareMode = true;
+      
+      // 获取所有选中文件的数据
+      const filesData = Array.from(selectedFileNames).map(name => ({
+        name: name,
+        data: uploadedFilesData[name]
+      })).filter(f => f.data && f.data.datasets);
+      
+      if (filesData.length < 2) {
+        alert('选中的文件数据不完整');
+        return;
+      }
+      
+      // 找到最小的通道数
+      const channelCounts = filesData.map(f => f.data.datasets.filter(ds => ds.number === 58).length);
+      const minChannels = Math.min(...channelCounts);
+      
+      if (minChannels === 0) {
+        alert('选中的文件没有通道数据');
+        return;
+      }
+      
+      // 显示对比模式的信息
+      hideLoading();
+      hideEmptyState();
+      document.getElementById('dataContent').classList.remove('hidden');
+      document.getElementById('fileName').textContent = filesData.map(f => f.name).join(' vs ');
+      document.getElementById('fileSize').textContent = `${filesData.length}个文件`;
+      document.getElementById('datasetCount').textContent = `${minChannels}个通道`;
+      
+      // 设置通道选择器
+      const sc = document.getElementById('datasetSelect');
+      sc.innerHTML = '';
+      for (let i = 0; i < minChannels; i++) {
+        sc.innerHTML += `<option value="${i}">通道${i+1}</option>`;
+      }
+      
+      // 启用通道导航按钮用于对比模式
+      document.getElementById('prevBtn').style.display = 'block';
+      document.getElementById('nextBtn').style.display = 'block';
+      document.getElementById('prevBtn').disabled = true; // 初始时禁用prev
+      document.getElementById('nextBtn').disabled = minChannels <= 1;
+      
+      // 保存对比数据
+      window.compareData = filesData;
+      window.compareChannelIndex = 0;
+      
+      // 渲染对比图表
+      renderCompareChart(0);
+      
+      // 显示退出对比按钮
+      showExitCompareButton();
+    }
+    
+    function showExitCompareButton() {
+      let btn = document.getElementById('exitCompareBtn');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'exitCompareBtn';
+        btn.className = 'compare-btn';
+        btn.style.background = '#e74c3c';
+        btn.style.marginTop = '10px';
+        btn.textContent = '退出对比';
+        btn.onclick = exitCompareMode;
+        document.getElementById('selectedFilesList').parentNode.appendChild(btn);
+      }
+      btn.style.display = 'block';
+    }
+    
+    function exitCompareMode() {
+      isCompareMode = false;
+      const btn = document.getElementById('exitCompareBtn');
+      if (btn) btn.style.display = 'none';
+      
+      document.getElementById('prevBtn').style.display = 'block';
+      document.getElementById('nextBtn').style.display = 'block';
+      
+      // 恢复单文件显示
+      if (selectedFileNames.size > 0) {
+        const firstFile = Array.from(selectedFileNames)[0];
+        if (uploadedFilesData[firstFile]) {
+          displayData(uploadedFilesData[firstFile]);
+        }
+      }
+    }
+    
+    function renderCompareChart(channelIndex) {
+      const ctx = document.getElementById('dataChart').getContext('2d');
+      if (chart) { chart.destroy(); chart = null; }
+      
+      const filesData = window.compareData;
+      if (!filesData || filesData.length < 2) return;
+      
+      // 更新按钮状态
+      const totalChannels = document.getElementById('datasetSelect').options.length;
+      document.getElementById('prevBtn').disabled = channelIndex === 0;
+      document.getElementById('nextBtn').disabled = channelIndex === totalChannels - 1;
+      
+      // 为每个文件获取该通道的数据
+      const datasets = [];
+      const colors = ['#667eea', '#764ba2', '#e74c3c', '#27ae60', '#3498db', '#f1c40f'];
+      
+      filesData.forEach((file, fileIdx) => {
+        const filteredDatasets = file.data.datasets.filter(ds => ds.number === 58);
+        if (filteredDatasets[channelIndex]) {
+          const ds = filteredDatasets[channelIndex];
+          if (ds.records && ds.records.data && ds.records.data.length) {
+            const curves = extractCurves(ds.records.data);
+            // 只显示实部曲线进行对比
+            if (curves[0]) {
+              datasets.push({
+                label: `${file.name} - 通道${channelIndex+1}`,
+                data: curves[0].points,
+                borderColor: colors[fileIdx % colors.length],
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.1,
+                fill: false
+              });
+            }
+          }
+        }
+      });
+      
+      if (datasets.length === 0) {
+        ctx.fillText('无对比数据', 200, 200);
+        return;
+      }
+      
+      const xAxisType = document.getElementById('xAxisType')?.value || 'linear';
+      const yAxisType = document.getElementById('yAxisType')?.value || 'linear';
+      
+      const logTicksCallback = function(value, index, values) {
+        if (index === 0) return value;
+        const log10 = Math.log10(value);
+        if (Math.abs(log10 - Math.round(log10)) < 0.01) {
+          if (value >= 1) return Math.round(value);
+          return value.toFixed(Math.ceil(-Math.log10(value)));
+        }
+        return '';
+      };
+      
+      chart = new Chart(ctx, { 
+        type:'line', 
+        data:{ labels: datasets[0]?.data.map(p=>p.x)||[], datasets }, 
+        options:{ 
+          responsive:true, 
+          maintainAspectRatio:false, 
+          plugins:{ 
+            legend:{position:'top'}
+          }, 
+          scales:{ 
+            x:{
+              type: xAxisType,
+              title:{display:true,text:'X'},
+              ticks: xAxisType === 'logarithmic' ? { callback: logTicksCallback, maxTicksLimit: 10 } : {}
+            }, 
+            y:{
+              type: yAxisType,
+              title:{display:true,text:'Y'},
+              ticks: yAxisType === 'logarithmic' ? { callback: logTicksCallback, maxTicksLimit: 10 } : {}
+            }
+          }
+        } 
+      });
+      
+      window.compareChannelIndex = channelIndex;
+      document.getElementById('datasetInfo').textContent = `${channelIndex+1} / ${document.getElementById('datasetSelect').options.length}`;
+    }
+    
+    // 修改文件选择处理，支持多文件
+    function handleFileSelect(files) {
+      const fileList = Array.from(files);
+      if (fileList.length === 0) return;
+      
+      // 依次上传所有文件并存储数据
+      let loadedCount = 0;
+      const totalFiles = fileList.length;
+      
+      fileList.forEach(file => {
+        // 检查文件是否已存在
+        if (!uploadedFilesData[file.name]) {
+          const fd = new FormData();
+          fd.append('file', file);
+          fetch('/api/parse', { method: 'POST', body: fd })
+            .then(res => res.json())
+            .then(d => {
+              uploadedFilesData[file.name] = d;
+              loadedCount++;
+              // 第一个文件直接显示
+              if (loadedCount === 1) {
+                displayData(d);
+              }
+              // 更新文件列表显示
+              updateSelectedFilesDisplay();
+            })
+            .catch(e => console.error('上传失败:', e));
+        } else {
+          loadedCount++;
+          if (loadedCount === 1) {
+            displayData(uploadedFilesData[file.name]);
+          }
+          updateSelectedFilesDisplay();
+        }
+      });
+    }
+    
+    function updateSelectedFilesDisplay() {
+      const files = Object.keys(uploadedFilesData).map(name => ({ name: name, size: 0 }));
+      displaySelectedFiles(files);
+    }
+    
     async function loadFile(path) { showLoading(); hideError(); try { const r = await fetch('/api/parse-path', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: path }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); displayData(d); } catch(e) { showError(e.message); } }
     
-    function displayData(d) { currentData = d; currentDatasetIndex = 0; hideLoading(); hideEmptyState(); document.getElementById('fileName').textContent = d.fileName||'-'; document.getElementById('fileSize').textContent = d.fileSizeFormatted||formatFileSize(d.fileSize||0); document.getElementById('datasetCount').textContent = d.totalDatasets||0; displayDatasetTabs(d.datasets); if (d.datasets&&d.datasets.length) renderChart(d.datasets[0]); }
+    function displayData(d) { 
+      // 如果是对比模式，先退出
+      if (isCompareMode) {
+        exitCompareMode();
+      }
+      
+      currentData = d; 
+      currentDatasetIndex = 0; 
+      hideLoading(); 
+      hideEmptyState(); 
+      document.getElementById('fileName').textContent = d.fileName||'-'; 
+      document.getElementById('fileSize').textContent = d.fileSizeFormatted||formatFileSize(d.fileSize||0); 
+      document.getElementById('datasetCount').textContent = d.totalDatasets||0; 
+      displayDatasetTabs(d.datasets); 
+      if (d.datasets&&d.datasets.length) renderChart(d.datasets[0]); 
+    }
     
     function displayDatasetTabs(datasets) {
       const sc = document.getElementById('datasetSelect');
@@ -764,13 +1061,30 @@
     }
     
     function selectDatasetFromDropdown() { 
-      currentDatasetIndex = parseInt(document.getElementById('datasetSelect').value); 
-      if(currentData.datasets[currentDatasetIndex]) renderChart(currentData.datasets[currentDatasetIndex]); 
-      const validCount = currentData.datasets.filter(ds => ds.number === 58).length;
-      updateDatasetInfo(validCount); 
+      if (isCompareMode) {
+        // 对比模式下切换通道
+        const channelIndex = parseInt(document.getElementById('datasetSelect').value);
+        renderCompareChart(channelIndex);
+      } else {
+        currentDatasetIndex = parseInt(document.getElementById('datasetSelect').value); 
+        if(currentData.datasets[currentDatasetIndex]) renderChart(currentData.datasets[currentDatasetIndex]); 
+        const validCount = currentData.datasets.filter(ds => ds.number === 58).length;
+        updateDatasetInfo(validCount); 
+      }
     }
     
     function navigateDataset(d) { 
+      if (isCompareMode) {
+        // 对比模式下的通道导航
+        const select = document.getElementById('datasetSelect');
+        let newIndex = window.compareChannelIndex + d;
+        if (newIndex >= 0 && newIndex < select.options.length) {
+          select.value = newIndex;
+          renderCompareChart(newIndex);
+        }
+        return;
+      }
+      
       if (!currentData||!currentData.datasets) return; 
       
       // 只找数据集58
@@ -872,7 +1186,16 @@
     }
     
     function getCurveColor(i) { const c=['#667eea','#764ba2','#e74c3c','#27ae60','#3498db','#f1c40f']; return c[i%c.length]; }
-    function updateChart() { if (currentData&&currentData.datasets&&currentData.datasets[currentDatasetIndex]) renderChart(currentData.datasets[currentDatasetIndex]); }
+    function updateChart() { 
+      if (isCompareMode) {
+        // 对比模式下更新对比图表
+        if (window.compareData && window.compareChannelIndex !== undefined) {
+          renderCompareChart(window.compareChannelIndex);
+        }
+      } else if (currentData&&currentData.datasets&&currentData.datasets[currentDatasetIndex]) {
+        renderChart(currentData.datasets[currentDatasetIndex]); 
+      }
+    }
     function showLoading() { loading.classList.remove('hidden'); emptyState.classList.add('hidden'); dataContent.classList.add('hidden'); }
     function hideLoading() { loading.classList.add('hidden'); dataContent.classList.remove('hidden'); }
     function hideEmptyState() { emptyState.classList.add('hidden'); }
@@ -895,8 +1218,35 @@
         const result = await r.json();
         dbFiles = result.files||[];
         if(!dbFiles.length) document.getElementById('dbFileList').innerHTML='<p style="color:#999;text-align:center;">暂无数据，请先导入文件</p>';
-        else document.getElementById('dbFileList').innerHTML=dbFiles.map(f=>`<div class="db-file-item" onclick="loadDbFile(${f.id})"><div class="file-icon">F</div><div class="file-info"><div class="file-name">${f.file_name}</div><div class="file-meta">${f.file_size_formatted}|${f.total_datasets}个|${f.import_time}</div></div><button class="action-btn delete" onclick="event.stopPropagation();deleteDbFile(${f.id})">X</button></div>`).join('');
+        else document.getElementById('dbFileList').innerHTML=dbFiles.map(f=>`<div class="db-file-item ${selectedDbFileIds.has(f.id) ? 'selected' : ''}" onclick="toggleDbFileSelect(${f.id}, event)"><input type="checkbox" ${selectedDbFileIds.has(f.id) ? 'checked' : ''} onclick="event.stopPropagation(); toggleDbFileSelect(${f.id}, event)"><div class="file-icon">F</div><div class="file-info"><div class="file-name">${f.file_name}</div><div class="file-meta">${f.file_size_formatted}|${f.total_datasets}个|${f.import_time}</div></div><button class="action-btn delete" onclick="event.stopPropagation();deleteDbFile(${f.id})">X</button></div>`).join('');
+        updateDbCompareButton();
       } catch(e) { console.error(e); }
+    }
+    
+    function toggleDbFileSelect(id, event) {
+      if (event) {
+        event.stopPropagation();
+      }
+      
+      if (selectedDbFileIds.has(id)) {
+        selectedDbFileIds.delete(id);
+      } else {
+        selectedDbFileIds.add(id);
+      }
+      loadDbFiles();
+      
+      // 如果不是对比模式，点击文件（不是checkbox）加载数据
+      if (!isDbCompareMode && event && event.target.type !== 'checkbox') {
+        const file = dbFiles.find(f => f.id === id);
+        if (file) {
+          loadDbFile(id);
+        }
+      }
+    }
+    
+    function updateDbCompareButton() {
+      const btn = document.getElementById('dbCompareBtn');
+      if (btn) btn.disabled = selectedDbFileIds.size < 2;
     }
     
     async function loadDbFile(id) {
@@ -926,8 +1276,224 @@
         const r = await fetch('/api/db/dataset/' + ds.id + '?limit=5000');
         const d = await r.json();
         currentDbFileDatasets[i].data = d.data||[];
-        renderDbChart(currentDbFileDatasets[i], ds);
+        
+        if (isDbCompareMode) {
+          // 对比模式下渲染对比图表
+          renderDbCompareChart(window.dbCompareChannelIndex || 0);
+        } else {
+          renderDbChart(currentDbFileDatasets[i], ds);
+        }
       } catch(e) { console.error(e); }
+    }
+    
+    // 数据库对比模式函数
+    async function startDbCompare() {
+      if (selectedDbFileIds.size < 2) {
+        alert('请至少选择2个文件进行对比');
+        return;
+      }
+      
+      isDbCompareMode = true;
+      
+      // 获取所有选中文件的数据
+      const selectedIds = Array.from(selectedDbFileIds);
+      const filesData = [];
+      
+      document.getElementById('dbLoading').classList.remove('hidden');
+      
+      try {
+        for (const id of selectedIds) {
+          const r = await fetch('/api/db/file/' + id);
+          const fi = await r.json();
+          filesData.push({
+            id: id,
+            name: fi.file_name,
+            datasets: fi.datasets || []
+          });
+        }
+        
+        if (filesData.length < 2) {
+          alert('选中的文件数据不完整');
+          return;
+        }
+        
+        // 找到最小的通道数
+        const channelCounts = filesData.map(f => f.datasets.filter(ds => ds.dataset_number === 58).length);
+        const minChannels = Math.min(...channelCounts);
+        
+        if (minChannels === 0) {
+          alert('选中的文件没有通道数据');
+          return;
+        }
+        
+        // 显示对比模式的信息
+        document.getElementById('dbLoading').classList.add('hidden');
+        document.getElementById('dbEmptyState').classList.add('hidden');
+        document.getElementById('dbDataContent').classList.remove('hidden');
+        document.getElementById('dbFileName').textContent = filesData.map(f => f.name).join(' vs ');
+        document.getElementById('dbImportTime').textContent = `${filesData.length}个文件`;
+        document.getElementById('dbDatasetCount').textContent = `${minChannels}个通道`;
+        
+        // 设置通道选择器
+        const sc = document.getElementById('dbDatasetSelect');
+        sc.innerHTML = '';
+        for (let i = 0; i < minChannels; i++) {
+          sc.innerHTML += `<option value="${i}">通道${i+1}</option>`;
+        }
+        
+        // 启用通道导航按钮
+        document.getElementById('dbPrevBtn').disabled = true;
+        document.getElementById('dbNextBtn').disabled = minChannels <= 1;
+        
+        // 保存对比数据
+        window.dbCompareData = filesData;
+        window.dbCompareChannelIndex = 0;
+        
+        // 加载第一个通道的数据
+        await loadDbCompareData(0);
+        
+        // 显示退出对比按钮
+        showDbExitCompareButton();
+        
+      } catch(e) {
+        console.error(e);
+        alert('加载失败: ' + e.message);
+        document.getElementById('dbLoading').classList.add('hidden');
+      }
+    }
+    
+    async function loadDbCompareData(channelIndex) {
+      const filesData = window.dbCompareData;
+      if (!filesData || filesData.length < 2) return;
+      
+      // 加载所有文件在该通道的数据
+      for (let i = 0; i < filesData.length; i++) {
+        const file = filesData[i];
+        const filteredDatasets = file.datasets.filter(ds => ds.dataset_number === 58);
+        if (filteredDatasets[channelIndex]) {
+          const ds = filteredDatasets[channelIndex];
+          if (!ds.data) {
+            try {
+              const r = await fetch('/api/db/dataset/' + ds.id + '?limit=5000');
+              const d = await r.json();
+              ds.data = d.data || [];
+            } catch(e) { console.error(e); }
+          }
+        }
+      }
+      
+      renderDbCompareChart(channelIndex);
+    }
+    
+    function renderDbCompareChart(channelIndex) {
+      const ctx = document.getElementById('dbDataChart').getContext('2d');
+      if (dbChart) { dbChart.destroy(); dbChart = null; }
+      
+      const filesData = window.dbCompareData;
+      if (!filesData || filesData.length < 2) return;
+      
+      // 更新按钮状态
+      const totalChannels = document.getElementById('dbDatasetSelect').options.length;
+      document.getElementById('dbPrevBtn').disabled = channelIndex === 0;
+      document.getElementById('dbNextBtn').disabled = channelIndex === totalChannels - 1;
+      
+      // 为每个文件获取该通道的数据
+      const datasets = [];
+      const colors = ['#667eea', '#764ba2', '#e74c3c', '#27ae60', '#3498db', '#f1c40f'];
+      
+      filesData.forEach((file, fileIdx) => {
+        const filteredDatasets = file.datasets.filter(ds => ds.dataset_number === 58);
+        if (filteredDatasets[channelIndex]) {
+          const ds = filteredDatasets[channelIndex];
+          if (ds.data && ds.data.length) {
+            const curves = extractCurves(ds.data);
+            // 只显示实部曲线进行对比
+            if (curves[0]) {
+              datasets.push({
+                label: `${file.name} - 通道${channelIndex+1}`,
+                data: curves[0].points,
+                borderColor: colors[fileIdx % colors.length],
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.1,
+                fill: false
+              });
+            }
+          }
+        }
+      });
+      
+      if (datasets.length === 0) {
+        ctx.fillText('无对比数据', 200, 200);
+        return;
+      }
+      
+      const xAxisType = document.getElementById('dbXAxisType')?.value || 'linear';
+      const yAxisType = document.getElementById('dbYAxisType')?.value || 'linear';
+      
+      const logTicksCallback = function(value, index, values) {
+        if (index === 0) return value;
+        const log10 = Math.log10(value);
+        if (Math.abs(log10 - Math.round(log10)) < 0.01) {
+          if (value >= 1) return Math.round(value);
+          return value.toFixed(Math.ceil(-Math.log10(value)));
+        }
+        return '';
+      };
+      
+      dbChart = new Chart(ctx, { 
+        type:'line', 
+        data:{ labels: datasets[0]?.data.map(p=>p.x)||[], datasets }, 
+        options:{ 
+          responsive:true, 
+          maintainAspectRatio:false, 
+          plugins:{ 
+            legend:{position:'top'}
+          }, 
+          scales:{ 
+            x:{
+              type: xAxisType,
+              title:{display:true,text:'X'},
+              ticks: xAxisType === 'logarithmic' ? { callback: logTicksCallback, maxTicksLimit: 10 } : {}
+            }, 
+            y:{
+              type: yAxisType,
+              title:{display:true,text:'Y'},
+              ticks: yAxisType === 'logarithmic' ? { callback: logTicksCallback, maxTicksLimit: 10 } : {}
+            }
+          }
+        } 
+      });
+      
+      window.dbCompareChannelIndex = channelIndex;
+      document.getElementById('dbDatasetInfo').textContent = `${channelIndex+1} / ${totalChannels}`;
+    }
+    
+    function showDbExitCompareButton() {
+      let btn = document.getElementById('dbExitCompareBtn');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'dbExitCompareBtn';
+        btn.className = 'compare-btn';
+        btn.style.background = '#e74c3c';
+        btn.style.marginTop = '10px';
+        btn.textContent = '退出对比';
+        btn.onclick = exitDbCompareMode;
+        document.getElementById('dbFileList').parentNode.appendChild(btn);
+      }
+      btn.style.display = 'block';
+    }
+    
+    function exitDbCompareMode() {
+      isDbCompareMode = false;
+      const btn = document.getElementById('dbExitCompareBtn');
+      if (btn) btn.style.display = 'none';
+      
+      // 恢复单文件显示
+      if (selectedDbFileIds.size > 0) {
+        const firstId = Array.from(selectedDbFileIds)[0];
+        loadDbFile(firstId);
+      }
     }
     
     function displayDbDatasetTabs() {
@@ -967,13 +1533,29 @@
     }
     
     function selectDbDatasetFromDropdown() { 
-      currentDbDatasetIndex = parseInt(document.getElementById('dbDatasetSelect').value); 
-      loadDbDatasetData(currentDbDatasetIndex); 
-      const validCount = currentDbFileDatasets.filter(ds => ds.dataset_number === 58).length;
-      updateDbDatasetInfo(validCount); 
+      if (isDbCompareMode) {
+        const channelIndex = parseInt(document.getElementById('dbDatasetSelect').value);
+        loadDbCompareData(channelIndex);
+      } else {
+        currentDbDatasetIndex = parseInt(document.getElementById('dbDatasetSelect').value); 
+        loadDbDatasetData(currentDbDatasetIndex); 
+        const validCount = currentDbFileDatasets.filter(ds => ds.dataset_number === 58).length;
+        updateDbDatasetInfo(validCount); 
+      }
     }
     
     function navigateDbDataset(d) { 
+      if (isDbCompareMode) {
+        // 对比模式下的通道导航
+        let newIndex = window.dbCompareChannelIndex + d;
+        const totalChannels = document.getElementById('dbDatasetSelect').options.length;
+        if (newIndex >= 0 && newIndex < totalChannels) {
+          document.getElementById('dbDatasetSelect').value = newIndex;
+          loadDbCompareData(newIndex);
+        }
+        return;
+      }
+      
       let ni = currentDbDatasetIndex + d;
       // 只找数据集58
       while (ni >= 0 && ni < currentDbFileDatasets.length && currentDbFileDatasets[ni].dataset_number !== 58) {
@@ -1060,7 +1642,15 @@
       });
     }
     
-    function updateDbChart(){if(currentDbFileDatasets[currentDbDatasetIndex])renderDbChart(currentDbFileDatasets[currentDbDatasetIndex],currentDbFileDatasets[currentDbDatasetIndex]);}
+    function updateDbChart(){
+      if (isDbCompareMode) {
+        if (window.dbCompareData && window.dbCompareChannelIndex !== undefined) {
+          renderDbCompareChart(window.dbCompareChannelIndex);
+        }
+      } else if (currentDbFileDatasets[currentDbDatasetIndex]) {
+        renderDbChart(currentDbFileDatasets[currentDbDatasetIndex],currentDbFileDatasets[currentDbDatasetIndex]);
+      }
+    }
     
     async function deleteDbFile(id){if(!confirm('确认删除?'))return;try{await fetch('/api/db/delete-file/'+id,{method:'DELETE'});loadDbFiles();loadDbStats();}catch(e){alert(e.message);}}
   </script>
